@@ -200,434 +200,179 @@
     </button>
 
     <script>
-        // ===== КОНФИГУРАЦИЯ GITHUB API =====
-        // ЗАМЕНИТЕ ЭТИ ЗНАЧЕНИЯ НА СВОИ!
-        const GITHUB_CONFIG = {
-            owner: 'dimetris-93',               // Ваш логин на GitHub
-            repo: 'gifts-list-data',            // Имя репозитория
-            path: 'gifts.json',                 // Путь к файлу данных
-            token: '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',    // Вставьте ваш GitHub Token
-            branch: 'main'                      // Обычно 'main' или 'master'
-        };
+// ===== КОНФИГУРАЦИЯ GITHUB API =====
+const GITHUB_CONFIG = {
+    owner: 'dimetris-93',
+    repo: 'gifts-list-data',
+    path: 'gifts.json',
+    token: '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', // ЗАМЕНИТЕ НА СВОЙ ТОКЕН!
+    branch: 'main'
+};
 
-        // Базовые URL для GitHub API
-        const GITHUB_API = {
-            base: 'https://api.github.com',
-            get contentUrl() {
-                return `${this.base}/repos/${GITHUB_CONFIG.owner}/${GITHUB_CONFIG.repo}/contents/${GITHUB_CONFIG.path}`;
-            }
-        };
+// ===== ИСПРАВЛЕННЫЕ ФУНКЦИИ =====
 
-        // ===== ПЕРЕМЕННЫЕ =====
-        let gifts = [];
-        let currentFileSha = ''; // SHA текущей версии файла (нужно для обновлений)
-        const ADMIN_PASSWORD = 'admin123'; // Пароль для админки
+// 1. Правильная функция для кодирования base64
+function encodeBase64(str) {
+    try {
+        return btoa(unescape(encodeURIComponent(str)));
+    } catch (e) {
+        console.error('Ошибка кодирования:', e);
+        return btoa(str);
+    }
+}
 
-        // ===== ОСНОВНЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С GITHUB =====
+// 2. Правильная функция для декодирования base64
+function decodeBase64(str) {
+    try {
+        return decodeURIComponent(escape(atob(str)));
+    } catch (e) {
+        console.error('Ошибка декодирования:', e);
+        return JSON.parse(atob(str));
+    }
+}
 
-        // Загрузить данные из GitHub
-        async function loadGiftsFromGitHub() {
-            try {
-                showLoading(true);
-                
-                const response = await fetch(GITHUB_API.contentUrl, {
-                    headers: {
-                        'Authorization': `token ${GITHUB_CONFIG.token}`,
-                        'Accept': 'application/vnd.github.v3+json'
-                    }
-                });
-                
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.message || 'Ошибка загрузки');
-                }
-                
-                const data = await response.json();
-                currentFileSha = data.sha; // Сохраняем SHA для будущих обновлений
-                
-                // Декодируем содержимое файла (оно в base64)
-                const content = JSON.parse(atob(data.content));
-                gifts = content.gifts || [];
-                
-                displayGifts();
-                updateStats();
-                updateShareLink();
-                
-            } catch (error) {
-                console.error('Ошибка загрузки из GitHub:', error);
-                showMessage(`Ошибка загрузки: ${error.message}`, 'error');
-                
-                // Показываем заглушку если нет подключения
-                document.getElementById('gifts-container').innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-exclamation-triangle"></i>
-                        <p>Не удалось загрузить данные с GitHub</p>
-                        <p style="font-size: 0.9rem; margin-top: 10px;">
-                            Проверьте настройки в коде (строка ~840)<br>
-                            и убедитесь, что файл gifts.json существует в репозитории.
-                        </p>
-                    </div>
-                `;
-            } finally {
-                showLoading(false);
-            }
-        }
-
-        // Обновить данные на GitHub
-        async function updateGiftsOnGitHub(updatedGifts, commitMessage) {
-            try {
-                // Подготавливаем данные для отправки
-                const contentData = {
-                    gifts: updatedGifts,
-                    lastUpdated: new Date().toISOString()
-                };
-                
-                // Кодируем в base64
-                const contentBase64 = btoa(JSON.stringify(contentData, null, 2));
-                
-                const response = await fetch(GITHUB_API.contentUrl, {
-                    method: 'PUT',
-                    headers: {
-                        'Authorization': `token ${GITHUB_CONFIG.token}`,
-                        'Accept': 'application/vnd.github.v3+json',
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        message: commitMessage,
-                        content: contentBase64,
-                        sha: currentFileSha, // Важно для обновления существующего файла
-                        branch: GITHUB_CONFIG.branch
-                    })
-                });
-                
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.message || 'Ошибка обновления');
-                }
-                
-                const result = await response.json();
-                currentFileSha = result.content.sha; // Обновляем SHA
-                return true;
-                
-            } catch (error) {
-                console.error('Ошибка обновления на GitHub:', error);
-                showMessage(`Ошибка сохранения: ${error.message}`, 'error');
-                return false;
-            }
-        }
-
-        // ===== ФУНКЦИИ ОТОБРАЖЕНИЯ (остаются почти такими же) =====
-
-        // Отображение подарков
-        function displayGifts() {
-            const container = document.getElementById('gifts-container');
-            const select = document.getElementById('giftSelect');
-            
-            // Обновляем выпадающий список
-            select.innerHTML = '<option value="">-- Выберите подарок --</option>';
-            
-            const availableGifts = gifts.filter(g => !g.isTaken);
-            availableGifts.forEach(gift => {
-                const option = document.createElement('option');
-                option.value = gift.id;
-                option.textContent = gift.name;
-                select.appendChild(option);
-            });
-
-            // Отображаем карточки
-            if (gifts.length === 0) {
-                container.innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-gift"></i>
-                        <p>Подарков пока нет. Добавьте первый подарок!</p>
-                    </div>
-                `;
-            } else {
-                let html = '<div class="gifts-grid">';
-                
-                gifts.forEach((gift, index) => {
-                    html += `
-                        <div class="gift-card ${gift.isTaken ? 'taken' : ''}">
-                            <div class="gift-number">${index + 1}</div>
-                            
-                            <div class="gift-header">
-                                <div class="gift-title">${gift.name}</div>
-                                ${gift.isTaken ?
-                                    `<div class="gift-status"><i class="fas fa-check"></i> Занят</div>` :
-                                    `<div class="gift-status" style="background: #4cc9f0;"><i class="fas fa-clock"></i> Доступен</div>`
-                                }
-                            </div>
-                            
-                            <div class="gift-description">
-                                ${gift.description}
-                            </div>
-                            
-                            <a href="${gift.url}" target="_blank" class="gift-link">
-                                <i class="fas fa-external-link-alt"></i> Посмотреть на OZON
-                            </a>
-                            
-                            <button class="select-btn" onclick="prepareSelection(${gift.id})"
-                                    ${gift.isTaken ? 'disabled' : ''}>
-                                ${gift.isTaken ?
-                                    '<i class="fas fa-lock"></i> Уже выбран' :
-                                    '<i class="fas fa-check"></i> Выбрать этот подарок'
-                                }
-                            </button>
-                            
-                            ${gift.isTaken && gift.takenBy ?
-                                `<div class="gift-owner">
-                                    <i class="fas fa-user"></i> Выбрал: ${gift.takenBy}
-                                    ${gift.takenAt ? ` в ${new Date(gift.takenAt).toLocaleString()}` : ''}
-                                </div>` :
-                                ''
-                            }
-                        </div>
-                    `;
-                });
-                
-                html += '</div>';
-                container.innerHTML = html;
-            }
-        }
-
-        // Обновление статистики
-        function updateStats() {
-            const total = gifts.length;
-            const taken = gifts.filter(g => g.isTaken).length;
-            const available = total - taken;
-            
-            document.getElementById('total-gifts').textContent = total;
-            document.getElementById('taken-gifts').textContent = taken;
-            document.getElementById('available-gifts').textContent = available;
-        }
-
-        // Подготовка выбора
-        function prepareSelection(giftId) {
-            const select = document.getElementById('giftSelect');
-            select.value = giftId;
-            document.getElementById('userName').focus();
-            
-            document.querySelector('.selection-form').scrollIntoView({
-                behavior: 'smooth',
-                block: 'center'
-            });
-        }
-
-        // Выбор подарка
-        async function selectGift() {
-            const giftId = parseInt(document.getElementById('giftSelect').value);
-            const userName = document.getElementById('userName').value.trim();
-            
-            if (!giftId || !userName) {
-                showMessage('Заполните имя и выберите подарок', 'error');
-                return;
-            }
-            
-            const giftIndex = gifts.findIndex(g => g.id === giftId);
-            
-            if (giftIndex === -1) {
-                showMessage('Подарок не найден', 'error');
-                return;
-            }
-            
-            if (gifts[giftIndex].isTaken) {
-                showMessage('Этот подарок уже выбран!', 'error');
-                return;
-            }
-            
-            // Обновляем локально
-            gifts[giftIndex].isTaken = true;
-            gifts[giftIndex].takenBy = userName;
-            gifts[giftIndex].takenAt = new Date().toISOString();
-            
-            // Сохраняем на GitHub
-            const success = await updateGiftsOnGitHub(
-                gifts,
-                `🎁 ${userName} выбрал(а) подарок: ${gifts[giftIndex].name}`
-            );
-            
-            if (success) {
-                showMessage(`🎉 Поздравляем, ${userName}! Вы выбрали "${gifts[giftIndex].name}"`, 'success');
-                displayGifts();
-                updateStats();
-                
-                // Очищаем форму
-                document.getElementById('userName').value = '';
-                document.getElementById('userEmail').value = '';
-                document.getElementById('giftSelect').value = '';
-            } else {
-                // Откатываем локальные изменения при ошибке
-                gifts[giftIndex].isTaken = false;
-                gifts[giftIndex].takenBy = null;
-                gifts[giftIndex].takenAt = null;
-            }
-        }
-
-        // Сброс всех выборов
-        async function resetAllGifts() {
-            const password = document.getElementById('adminPassword').value;
-            
-            if (password !== ADMIN_PASSWORD) {
-                showMessage('Неверный пароль', 'error');
-                return;
-            }
-            
-            if (!confirm('Вы уверены, что хотите сбросить ВСЕ выборы подарков? Это действие нельзя отменить.')) {
-                return;
-            }
-            
-            // Сбрасываем все подарки
-            const resetGifts = gifts.map(gift => ({
-                ...gift,
-                isTaken: false,
-                takenBy: null,
-                takenAt: null
-            }));
-            
-            // Сохраняем на GitHub
-            const success = await updateGiftsOnGitHub(
-                resetGifts,
-                '🔄 Сброшены все выборы подарков'
-            );
-            
-            if (success) {
-                gifts = resetGifts;
-                showMessage('✅ Все выборы сброшены!', 'success');
-                document.getElementById('adminPassword').value = '';
-                displayGifts();
-                updateStats();
-            }
-        }
-
-        // Добавление нового подарка
-        async function addNewGift() {
-            const password = document.getElementById('adminPassword').value;
-            const name = document.getElementById('newGiftName').value.trim();
-            const url = document.getElementById('newGiftUrl').value.trim();
-            const description = document.getElementById('newGiftDesc').value.trim();
-            
-            if (password !== ADMIN_PASSWORD) {
-                showMessage('Неверный пароль', 'error');
-                return;
-            }
-            
-            if (!name || !url) {
-                showMessage('Заполните название и ссылку', 'error');
-                return;
-            }
-            
-            // Создаем новый подарок
-            const newId = gifts.length > 0 ? Math.max(...gifts.map(g => g.id)) + 1 : 1;
-            const newGift = {
-                id: newId,
-                name: name,
-                url: url,
-                description: description || 'Без описания',
-                isTaken: false,
-                takenBy: null,
-                takenAt: null
-            };
-            
-            const updatedGifts = [...gifts, newGift];
-            
-            // Сохраняем на GitHub
-            const success = await updateGiftsOnGitHub(
-                updatedGifts,
-                `➕ Добавлен новый подарок: ${name}`
-            );
-            
-            if (success) {
-                gifts = updatedGifts;
-                showMessage('✅ Новый подарок добавлен!', 'success');
-                
-                // Очищаем поля
-                document.getElementById('newGiftName').value = '';
-                document.getElementById('newGiftUrl').value = '';
-                document.getElementById('newGiftDesc').value = '';
-                document.getElementById('adminPassword').value = '';
-                
-                displayGifts();
-                updateStats();
-            }
-        }
-
-        // ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
-
-        function showLoading(show) {
-            const container = document.getElementById('gifts-container');
-            if (show) {
-                container.innerHTML = `
-                    <div class="empty-state">
-                        <i class="fas fa-spinner fa-spin"></i>
-                        <p>Загрузка списка подарков...</p>
-                    </div>
-                `;
-            }
-        }
-
-        function showMessage(text, type) {
-            const messageDiv = document.getElementById('message');
-            messageDiv.textContent = text;
-            messageDiv.className = `message ${type}`;
-            messageDiv.style.display = 'block';
-            
-            if (type === 'success') {
-                setTimeout(() => {
-                    messageDiv.style.display = 'none';
-                }, 5000);
-            }
-        }
-
-        function updateShareLink() {
-            document.getElementById('shareUrl').value = window.location.href;
-        }
-
-        function copyShareLink() {
-            const shareInput = document.getElementById('shareUrl');
-            shareInput.select();
-            
-            navigator.clipboard.writeText(shareInput.value)
-                .then(() => showMessage('✅ Ссылка скопирована!', 'success'))
-                .catch(() => {
-                    document.execCommand('copy');
-                    showMessage('✅ Ссылка скопирована!', 'success');
-                });
-        }
-
-        // ===== ИНИЦИАЛИЗАЦИЯ =====
-        function loadGifts() {
-            loadGiftsFromGitHub();
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            // Проверка конфигурации
-            if (!GITHUB_CONFIG.token || GITHUB_CONFIG.token === 'ВАШ_GITHUB_TOKEN_ЗДЕСЬ') {
-                document.getElementById('message').innerHTML = `
-                    <div class="error">
-                        <strong>⚠️ Настройка не завершена!</strong><br>
-                        1. Получите GitHub Personal Access Token<br>
-                        2. Вставьте его в код (строка ~840)<br>
-                        3. Убедитесь, что файл gifts.json есть в репозитории
-                        <a href="https://github.com/dimetris-93/gifts-list-data" target="_blank">вашего репозитория</a>
-                    </div>
-                `;
-                document.getElementById('message').style.display = 'block';
-            } else {
-                // Загружаем данные
-                loadGiftsFromGitHub();
-                
-                // Автообновление каждые 10 секунд
-                setInterval(loadGiftsFromGitHub, 10000);
-                
-                // Обновляем ссылку
-                updateShareLink();
+// 3. Загрузка данных с GitHub (исправленная)
+async function loadGiftsFromGitHub() {
+    try {
+        showLoading(true);
+        
+        const url = `https://api.github.com/repos/${GITHUB_CONFIG.owner}/${GITHUB_CONFIG.repo}/contents/${GITHUB_CONFIG.path}`;
+        
+        console.log('Запрос к:', url);
+        
+        const response = await fetch(url, {
+            headers: {
+                'Authorization': `token ${GITHUB_CONFIG.token}`,
+                'Accept': 'application/vnd.github.v3+json'
             }
         });
+        
+        console.log('Статус ответа:', response.status);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Текст ошибки:', errorText);
+            
+            if (response.status === 404) {
+                throw new Error('Файл gifts.json не найден в репозитории');
+            } else if (response.status === 401) {
+                throw new Error('Неверный GitHub Token');
+            } else if (response.status === 403) {
+                throw new Error('Доступ запрещен. Проверьте токен и права доступа');
+            } else {
+                throw new Error(`GitHub API вернул ошибку: ${response.status}`);
+            }
+        }
+        
+        const data = await response.json();
+        console.log('Получены данные от GitHub:', data);
+        
+        currentFileSha = data.sha;
+        
+        // Декодируем содержимое
+        let content;
+        try {
+            content = decodeBase64(data.content);
+        } catch (e) {
+            // Пробуем альтернативный метод
+            content = JSON.parse(atob(data.content));
+        }
+        
+        console.log('Декодированный контент:', content);
+        
+        gifts = content.gifts || [];
+        
+        if (gifts.length === 0) {
+            console.warn('Список подарков пуст!');
+        }
+        
+        displayGifts();
+        updateStats();
+        updateShareLink();
+        
+        showMessage('✅ Данные успешно загружены с GitHub!', 'success');
+        
+    } catch (error) {
+        console.error('Полная ошибка:', error);
+        
+        let errorMessage = `Ошибка: ${error.message}`;
+        
+        // Проверяем настройки
+        if (!GITHUB_CONFIG.token || GITHUB_CONFIG.token.includes('ВАШ_GITHUB_TOKEN')) {
+            errorMessage = '❌ Вставьте ваш GitHub Token в код (строка ~840)';
+        } else if (error.message.includes('404')) {
+            errorMessage = '❌ Файл gifts.json не найден. Создайте его в репозитории';
+        } else if (error.message.includes('401') || error.message.includes('403')) {
+            errorMessage = '❌ Ошибка токена. Проверьте GitHub Token';
+        }
+        
+        showMessage(errorMessage, 'error');
+        
+        // Показываем подробности для отладки
+        document.getElementById('gifts-container').innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-bug"></i>
+                <p>${errorMessage}</p>
+                <div style="margin-top: 20px; font-size: 0.9rem; color: var(--gray);">
+                    <p><strong>Для отладки:</strong></p>
+                    <p>1. Откройте DevTools (F12) → Console</p>
+                    <p>2. Проверьте сообщения об ошибках</p>
+                    <p>3. Убедитесь, что файл gifts.json существует</p>
+                    <p>4. Проверьте GitHub Token</p>
+                </div>
+            </div>
+        `;
+    } finally {
+        showLoading(false);
+    }
+}
 
-        // Обработка ошибок
-        window.addEventListener('error', function(e) {
-            console.error('Global error:', e.error);
+// 4. Обновление данных (исправленное)
+async function updateGiftsOnGitHub(updatedGifts, commitMessage) {
+    try {
+        const contentData = {
+            gifts: updatedGifts,
+            lastUpdated: new Date().toISOString()
+        };
+        
+        const jsonString = JSON.stringify(contentData, null, 2);
+        const contentBase64 = encodeBase64(jsonString);
+        
+        const url = `https://api.github.com/repos/${GITHUB_CONFIG.owner}/${GITHUB_CONFIG.repo}/contents/${GITHUB_CONFIG.path}`;
+        
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `token ${GITHUB_CONFIG.token}`,
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                message: commitMessage,
+                content: contentBase64,
+                sha: currentFileSha,
+                branch: GITHUB_CONFIG.branch
+            })
         });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error('Ошибка обновления:', errorData);
+            throw new Error(errorData.message || 'Ошибка сохранения');
+        }
+        
+        const result = await response.json();
+        currentFileSha = result.content.sha;
+        
+        console.log('✅ Данные успешно сохранены на GitHub');
+        return true;
+        
+    } catch (error) {
+        console.error('Ошибка обновления:', error);
+        showMessage(`❌ Ошибка сохранения: ${error.message}`, 'error');
+        return false;
+    }
+}
     </script>
 </body>
 </html>
